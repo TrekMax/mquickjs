@@ -20,6 +20,8 @@ option(MQJS_BUILD_TESTS "Build C unit test executables (dtoa_test, libm_test)" O
 
 # Host tools are executed at build time to generate headers.
 set(MQJS_HOST_CC "gcc" CACHE STRING "Host C compiler used to build header-generator tools when cross-compiling")
+set(MQJS_STDLIB_TOOL "" CACHE FILEPATH "Path to a runnable host mqjs_stdlib tool (overrides building mqjs_stdlib_host)")
+set(MQJS_EXAMPLE_STDLIB_TOOL "" CACHE FILEPATH "Path to a runnable host example_stdlib tool (overrides building example_stdlib_host)")
 
 # Common flags (mirrors the Makefile intent; build type still controls -g/-O in most toolchains)
 set(_mqjs_common_cflags
@@ -91,6 +93,21 @@ set(MQJS_MQJS_STDLIB_H "${MQJS_GEN_DIR}/mqjs_stdlib.h")
 set(MQJS_EXAMPLE_STDLIB_H "${MQJS_GEN_DIR}/example_stdlib.h")
 
 # Host tools to generate headers (mqjs_stdlib / example_stdlib)
+if(MQJS_STDLIB_TOOL)
+    if(NOT EXISTS "${MQJS_STDLIB_TOOL}")
+        message(FATAL_ERROR "MQJS_STDLIB_TOOL does not exist: ${MQJS_STDLIB_TOOL}")
+    endif()
+    set(_mqjs_stdlib_tool "${MQJS_STDLIB_TOOL}")
+endif()
+
+if(MQJS_EXAMPLE_STDLIB_TOOL)
+    if(NOT EXISTS "${MQJS_EXAMPLE_STDLIB_TOOL}")
+        message(FATAL_ERROR "MQJS_EXAMPLE_STDLIB_TOOL does not exist: ${MQJS_EXAMPLE_STDLIB_TOOL}")
+    endif()
+    set(_example_stdlib_tool "${MQJS_EXAMPLE_STDLIB_TOOL}")
+endif()
+
+if(NOT DEFINED _mqjs_stdlib_tool OR NOT DEFINED _example_stdlib_tool)
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(mqjs_stdlib_host mqjs_stdlib.c mquickjs_build.c)
     target_compile_options(mqjs_stdlib_host PRIVATE ${_mqjs_common_cflags} -O2)
@@ -102,6 +119,8 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     set(_mqjs_stdlib_tool "$<TARGET_FILE:mqjs_stdlib_host>")
     set(_example_stdlib_tool "$<TARGET_FILE:example_stdlib_host>")
+    set(_mqjs_stdlib_tool_dep mqjs_stdlib_host)
+    set(_example_stdlib_tool_dep example_stdlib_host)
 else()
     # When cross-compiling, the target compiler cannot produce runnable binaries.
     # Build generator tools with MQJS_HOST_CC via custom commands.
@@ -128,28 +147,46 @@ else()
 
     add_custom_target(mqjs_stdlib_host DEPENDS "${_mqjs_stdlib_tool}")
     add_custom_target(example_stdlib_host DEPENDS "${_example_stdlib_tool}")
+
+    set(_mqjs_stdlib_tool_dep mqjs_stdlib_host)
+    set(_example_stdlib_tool_dep example_stdlib_host)
 endif()
+endif()
+
+set(_mqjs_gen_header_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_header.cmake")
 
 add_custom_command(
     OUTPUT "${MQJS_MQUICKJS_ATOM_H}"
-    COMMAND "${_mqjs_stdlib_tool}" -a ${_mqjs_build_flags} > "${MQJS_MQUICKJS_ATOM_H}"
-    DEPENDS ${_mqjs_stdlib_tool}
+    COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL:FILEPATH=${_mqjs_stdlib_tool}"
+            "-DOUT:FILEPATH=${MQJS_MQUICKJS_ATOM_H}"
+            "-DARGS_STR:STRING=-a ${_mqjs_build_flags}"
+            -P "${_mqjs_gen_header_script}"
+    DEPENDS "${_mqjs_gen_header_script}"
     VERBATIM
 )
 set_source_files_properties("${MQJS_MQUICKJS_ATOM_H}" PROPERTIES GENERATED TRUE)
 
 add_custom_command(
     OUTPUT "${MQJS_MQJS_STDLIB_H}"
-    COMMAND "${_mqjs_stdlib_tool}" ${_mqjs_build_flags} > "${MQJS_MQJS_STDLIB_H}"
-    DEPENDS ${_mqjs_stdlib_tool}
+    COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL:FILEPATH=${_mqjs_stdlib_tool}"
+            "-DOUT:FILEPATH=${MQJS_MQJS_STDLIB_H}"
+            "-DARGS_STR:STRING=${_mqjs_build_flags}"
+            -P "${_mqjs_gen_header_script}"
+    DEPENDS "${_mqjs_gen_header_script}"
     VERBATIM
 )
 set_source_files_properties("${MQJS_MQJS_STDLIB_H}" PROPERTIES GENERATED TRUE)
 
 add_custom_command(
     OUTPUT "${MQJS_EXAMPLE_STDLIB_H}"
-    COMMAND "${_example_stdlib_tool}" ${_mqjs_build_flags} > "${MQJS_EXAMPLE_STDLIB_H}"
-    DEPENDS ${_example_stdlib_tool}
+    COMMAND "${CMAKE_COMMAND}"
+            "-DTOOL:FILEPATH=${_example_stdlib_tool}"
+            "-DOUT:FILEPATH=${MQJS_EXAMPLE_STDLIB_H}"
+            "-DARGS_STR:STRING=${_mqjs_build_flags}"
+            -P "${_mqjs_gen_header_script}"
+    DEPENDS "${_mqjs_gen_header_script}"
     VERBATIM
 )
 set_source_files_properties("${MQJS_EXAMPLE_STDLIB_H}" PROPERTIES GENERATED TRUE)
@@ -157,6 +194,13 @@ set_source_files_properties("${MQJS_EXAMPLE_STDLIB_H}" PROPERTIES GENERATED TRUE
 add_custom_target(mqjs_generated_headers
     DEPENDS "${MQJS_MQUICKJS_ATOM_H}" "${MQJS_MQJS_STDLIB_H}" "${MQJS_EXAMPLE_STDLIB_H}"
 )
+
+if(TARGET mqjs_stdlib_host)
+    add_dependencies(mqjs_generated_headers mqjs_stdlib_host)
+endif()
+if(TARGET example_stdlib_host)
+    add_dependencies(mqjs_generated_headers example_stdlib_host)
+endif()
 
 # Core sources (shared between mqjs and example)
 add_library(mquickjs_core OBJECT

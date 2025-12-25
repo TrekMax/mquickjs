@@ -1,6 +1,8 @@
 MicroQuickJS
 ============
 
+Chinese documentation: [README_zh.md](README_zh.md)
+
 ## Introduction
 
 MicroQuickJS (aka. MQuickJS) is a JavaScript engine targetted at
